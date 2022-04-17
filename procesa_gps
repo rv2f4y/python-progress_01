@@ -1,0 +1,227 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Apr 11 09:51:52 2022
+
+@author: rvazquez
+"""
+
+import time
+import os
+import datetime
+import json
+import psycopg2
+
+#CODIGOENTIDAD;IDLINEA;INTERNO;C_LD_ID;FILE_ID;FILENAME;RECORD_TYPE;DTSN;DATE_TIME;TYPE;DIRECTION
+#            0,      1,      2,      3,      4,       5,          6,   7,        8,   9,       10
+#;DEVICE;LONGITUDE;LATITUDE;VELOCITY;DISTANCE;STATUS;C_CONTROL_POINT
+#     11,       12,      13,      14,      15,    16,             17      
+
+#-------------------------------------------------------
+# funcion procesa
+#-------------------------------------------------------
+
+def procesa(data):
+#Primera linea no se procesa
+    if(globals()['FT']==True):
+        globals()['FT']=False
+    else:
+        cx="".join(map(str, data))
+        campos = cx.split(";")
+#       print(type(campos))
+#       print(len(campos)) #18
+#       print(campos)
+#       print(campos[0])
+#Validamos y si esta ok grabamos
+        xfecha=campos[8]
+        ctrl_lineas(campos[1])
+        ctrl_fechas(xfecha[0:10])
+        if(valida(campos)==True):
+            graba(campos)
+            globals()['cregout']=globals()['cregout']+1
+
+#-------------------------------------------------------
+# funcion valida
+#-------------------------------------------------------
+def valida(campos):
+#    print('valida')
+    fechaarchivo=campos[8]
+    fechaarchivo=fechaarchivo[0:10]
+    fecha_dt = datetime.datetime.strptime(fechaarchivo, '%d/%m/%Y')
+    if (campos[12] == ''):
+        print(str(creg)+' Lat0')
+        return False
+    if (campos[13] == ''):
+        print(str(creg)+' Lan0')
+        return False
+    if(fecha_dt<FechaHasta_dt):
+        print(str(creg)+' Fecha')
+        return False
+    return True
+
+#-------------------------------------------------------
+# funcion graba
+#-------------------------------------------------------
+def graba(campos):
+    fechatrx=campos[8]
+    lineaout=str(creg)+','+campos[0]+','+campos[1]+','+campos[2]+','+campos[3]+','+campos[4]+','+campos[6]+','+campos[7]
+#    print(fechatrx[6:10]+fechatrx[3:5]+fechatrx[0:2]+fechatrx[10:19])
+    lineaout=lineaout+','+fechatrx[6:10]+fechatrx[3:5]+fechatrx[0:2]+fechatrx[10:19]
+    lineaout=lineaout+','+campos[9]+','+campos[10]+','+campos[11]+','+campos[12]+','+campos[13]
+    lineaout=lineaout+','+campos[14]+','+campos[15]+','+campos[16]+','+campos[16]
+#   lineaout=lineaout+','+campos[16]+','+campos[17]
+#   print(lineaout)
+    fileout.write(lineaout+'\n' )
+
+#-------------------------------------------------------
+# Controla la lista de lineas
+#-------------------------------------------------------
+def ctrl_lineas(idlinea):
+    if (len(idlinea) == 0):
+        idlinea=-1
+
+    if idlinea in lineas:
+        indice = lineas.index(idlinea)        
+        lineas_creg[indice]=lineas_creg[indice]+1
+        # le sumamos 1 
+    else:
+        lineas.append(idlinea)        
+        lineas_creg.append(1)
+
+#-------------------------------------------------------
+# Controla la lista de Fechas
+#-------------------------------------------------------
+def ctrl_fechas(fecha):
+    if fecha in fechas: 
+        indice = fechas.index(fecha)        
+        fechas_creg[indice]=fechas_creg[indice]+1
+        # le sumamos 1 
+    else:
+        fechas.append(fecha)        
+        fechas_creg.append(1)
+
+""" =====================================================================
+                Prueba conexion a Postgres 
+========================================================================="""
+def prueba_conectar_a_postgres():
+    try:
+        connection = psycopg2.connect(**credenciales)
+
+        cursor = connection.cursor()
+        # Print PostgreSQL Connection properties
+        print ( connection.get_dsn_parameters(),"\n")
+
+        # Print PostgreSQL version
+        cursor.execute("SELECT version();")
+        record = cursor.fetchone()
+        print("You are connected to - ", record,"\n")
+
+    except (Exception, psycopg2.Error) as error :
+        print ("Error while connecting to PostgreSQL", error)
+    finally:
+        #closing database connection.
+            if(connection):
+                cursor.close()
+                connection.close()
+                print("PostgreSQL connection is closed")
+
+""" =====================================================================
+        Insertar en Postgres la informacion de las lineas 
+========================================================================="""
+def insertar_lineas_postgres(fileproc):
+# borramos si hay algo antes
+    fechaproc=time.strftime("%Y%m%d")
+    try:
+        connection = psycopg2.connect(**credenciales)
+        with connection.cursor() as cursor:
+            consulta = "DELETE FROM ctrl_gps WHERE archivo = %s;"
+            archivo = fileproc #"GPS_ENERO_2022_PRUEBA.csv"
+            cursor.execute(consulta, (archivo,))
+
+        # No olvidemos hacer commit cuando hacemos un cambio a la BD
+        connection.commit()
+    except psycopg2.Error as e:
+        print("Error Postgres: ", e)
+    finally:
+        connection.close()
+
+# Ahora insertamos
+    try:
+        connection = psycopg2.connect(**credenciales)
+        indice = 0
+        with connection.cursor() as cursor:
+            while indice < len(lineas):
+                consulta="INSERT INTO ctrl_gps(archivo,fechaproceso,idlinea,cantregs) values(%s, %s, %s, %s)"
+                cursor.execute(consulta, (fileproc,fechaproc,lineas[indice],lineas_creg[indice]))
+                indice += 1
+            connection.commit()  # Si no haces commit, los cambios no se guardan
+
+    except psycopg2.Error as e:
+        print("Ocurrió un error al insertar: ", e)
+    finally:
+        connection.close()
+
+
+""" =====================================================================
+                                Programa 
+========================================================================="""
+
+inicio = time.time()
+print ('Start '+time.strftime("%H:%M:%S"))
+
+with open('parametros.json') as fileparam:
+    parametros = json.load(fileparam)
+with open("credenciales.json") as archivo_credenciales:
+    credenciales = json.load(archivo_credenciales)
+
+#print(parametros['fileinput'])
+
+creg=cregout=0              #Contamos los registros que leemos y los que escribimos
+FT=True                     #Para no grabar el encabezado del archivo de entrada
+FechaHasta = '01/06/2021'   #Fecha hasta donde dejo pasar registros, mas o menos 6 meses para atras
+FechaHasta_dt = datetime.datetime.strptime(FechaHasta, '%d/%m/%Y')
+
+lineasx=dict()
+lineas=[0]              #Declaro una lista para contar entradas x idlinea
+lineas_creg=[0]         #Declaro una lista para contar entradas x idlinea
+fechas=['26/01/1962']   #Declaro una lista para contar las entradas x fecha
+fechas_creg=[0]         #Declaro una lista para contar entradas x fechas
+
+#filein = open("v:\\data\\2022\\01_ENERO\\GPS_ENERO_2022_PRUEBA.csv", "r")
+#fileout = open("v:\\data\\2022\\01_ENERO\\GPS_ENERO_2022_PRUEBA_OUT.csv", "w")
+#filelog = open("v:\\data\\2022\\01_ENERO\\GPS_ENERO_2022_PRUEBA.log", "w")
+filein  = open("d:\\SubeTmp\\procesar\\2022\\GPS_ENERO_2022_PRUEBA.csv", "r")
+fileout = open("d:\\SubeTmp\\procesar\\2022\\GPS_ENERO_2022_PRUEBA_OUT.csv", "w")
+filelog = open("d:\\SubeTmp\\procesar\\2022\\GPS_ENERO_2022_PRUEBA.log", "w")
+filelog.write('Start '+time.strftime(" %H:%M:%S")+"\n")
+fileout.write("id,codigoentidad,idlinea,interno,c_ld_id,file_id,record_type,dtsn,fechagps,typer,direction,device,longitud,latitud,velocity,distance,status,c_control_point\n")
+
+for linea in filein:    
+#    print(linea)
+    procesa(linea)
+    creg=creg+1
+    if(creg%1000000==0):
+        print (time.strftime("%H:%M:%S")+" CReg: "+str(creg))
+        filelog.write(time.strftime("%H:%M:%S")+" CReg: "+str(creg)+"\n")
+
+# esto lo tengo que guardar en la bd
+insertar_lineas_postgres('GPS_ENERO_2022_PRUEBA.csv')
+#filelog.write('idlinea,creg'+"\n")
+#indice = 0
+#while indice < len(lineas):
+#    filelog.write((str(lineas[indice])+','+str(lineas_creg[indice]))+"\n")
+#    indice += 1
+
+# esto lo tengo que guardar en la bd
+filelog.write('fecha,creg'+"\n")
+indice = 0    
+while indice < len(fechas):
+    filelog.write((str(fechas[indice])+','+str(fechas_creg[indice]))+"\n")
+    indice += 1    
+
+
+filein.close()
+fileout.close()
+fin = time.time()
+print ('Fin '+time.strftime("%H:%M:%S")+" CReg: "+str(creg)+" CRegOut: "+str(cregout))
+filelog.write('Fin '+time.strftime("%H:%M:%S")+" CReg: "+str(creg)+" CRegOut: "+str(cregout)+"\n")
+filelog.close()
