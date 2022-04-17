@@ -1,0 +1,8 @@
+{
+    "fileinput":"v:\\data\\2022\\01_ENERO\\GPS_ENERO_2022_PRUEBA.csv",
+    "fileoutput":"v:\\data\\2022\\01_ENERO\\GPS_ENERO_2022_PRUEBA_OUT.csv",
+    "filelog":"v:\\data\\2022\\01_ENERO\\GPS_ENERO_2022_PRUEBA.log",
+    "archivo":"GPS_ENERO_2022_PRUEBA.csv",
+    "fecproceso":"202201",
+    "fechahasta":"01/06/2021"
+}
